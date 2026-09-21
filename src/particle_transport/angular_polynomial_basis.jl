@@ -50,6 +50,12 @@ discretization, and produce both discrete-to-moments and moments-to-discrete mat
 """
 function angular_polynomial_basis(Ω::Vector{Vector{Float64}},w::Vector{Float64},L::Int64,type::String,Qdims::Int64)
 
+    # `galerkin-direct` changes only the representation of eligible surface
+    # sources; the volume angular basis remains the Galerkin-D basis.
+    if type == "galerkin-direct"
+        type = "galerkin-d"
+    end
+
     #----
     # Compute Legendre or real spherical harmonics
     #----
@@ -176,6 +182,31 @@ function angular_polynomial_basis(Ω::Vector{Vector{Float64}},w::Vector{Float64}
         error("Domain dimension should be either 1, 2 or 3.")
     end
     return Np,Mn,Dn,pl,pm
+end
+
+"""
+    direct_surface_angular_basis_1D(Ω)
+
+Identity half-range basis used for a collocated 1D surface source.  Coefficients
+are incoming discrete angular-flux values, rather than half-range moments.  It is
+used only with `galerkin-direct`; the volume basis is unchanged.
+"""
+function direct_surface_angular_basis_1D(Ω::Vector{Vector{Float64}})
+    μ = Ω[1]
+    nplus_to_n = [findall(>(0.0), μ), findall(<(0.0), μ)]
+    Np = length(nplus_to_n[1])
+    length(nplus_to_n[2]) == Np || error("Direct 1D surface basis requires equal positive and negative direction counts.")
+    # Match the surface container type required by sn_one_speed (Julia's
+    # Vector{Matrix{Float64}} is not a subtype of Vector{Array{Float64}}).
+    Mn = Array{Float64}[Matrix{Float64}(I, Np, Np), Matrix{Float64}(I, Np, Np)]
+    Dn = Array{Float64}[Matrix{Float64}(I, Np, Np), Matrix{Float64}(I, Np, Np)]
+    n_to_nplus = [zeros(Int, length(μ)), zeros(Int, length(μ))]
+    for b in 1:2, (np, n) in enumerate(nplus_to_n[b])
+        n_to_nplus[b][n] = np
+    end
+    pl = [zeros(Int64, Np), zeros(Int64, Np)]
+    pm = [zeros(Int64, Np), zeros(Int64, Np)]
+    return Np, Mn, Dn, nplus_to_n, n_to_nplus, pl, pm
 end
 
 """

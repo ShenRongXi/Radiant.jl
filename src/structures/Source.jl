@@ -14,7 +14,9 @@ mutable struct Source
     normalization_factor       ::Float64
     cross_sections             ::Cross_Sections
     geometry                   ::Geometry
-    solver         ::Solver
+    solver                     ::Solver
+    surface_source_objects     ::Vector{Surface_Source}
+    point_sources              ::Vector{Point_Source}
 
     # Constructor(s)
     function Source(particle::Particle,cross_sections::Cross_Sections,geometry::Geometry,solver::Solver)
@@ -25,6 +27,8 @@ mutable struct Source
         this.cross_sections = cross_sections
         this.geometry = geometry
         this.solver = solver
+        this.surface_source_objects = Vector{Surface_Source}()
+        this.point_sources = Vector{Point_Source}()
         initalize_sources(this,cross_sections,geometry,solver)
         return this
     end
@@ -133,6 +137,7 @@ function add_source(this::Source,source::Volume_Source)
     particle = source.particle
     Qv,norm = volume_source(particle,source,this.cross_sections,this.geometry)
     this.volume_sources[:,1,1,:,:,:] += Qv[:,1,1,:,:,:]
+    this.normalization_factor += norm
     source.normalization_factor += norm
 end
 
@@ -191,7 +196,9 @@ function add_source(this::Source,surface_sources::Surface_Source)
         Q_old[ig,l+1,i] += Q_new[ig,l+1,i]
     end
     this.surface_sources = Q_old
+    this.normalization_factor += norm
     surface_sources.normalization_factor += norm
+    push!(this.surface_source_objects, surface_sources)
 end
 
 """
@@ -209,6 +216,110 @@ N/A
 """
 function add_volume_source(this::Source,source::Array{Float64})
     this.volume_sources = source
+end
+
+"""
+    add_source(this::Source,source::Point_Source)
+
+Add a point source. Only appends to `point_sources`; the source strength is carried by
+`Point_Source.intensity` and does not modify `volume_sources` or `normalization_factor`.
+
+# Input Argument(s)
+- `this::Source` : source structure.
+- `source::Point_Source` : point source.
+
+# Output Argument(s)
+N/A
+
+"""
+function add_source(this::Source,source::Point_Source)
+    push!(this.point_sources, source)
+end
+
+"""
+    has_point_sources(this::Source)
+
+Return `true` if the source carries at least one point source.
+
+"""
+has_point_sources(this::Source)::Bool = !isempty(this.point_sources)
+
+"""
+    zero_surface_sources!(this::Source)
+
+Zero out the `surface_sources` array of `this` source in-place.
+The underlying helper operates on the raw array and handles scalar and array entries.
+
+# Input Argument(s)
+- `this::Source` : source structure.
+
+# Output Argument(s)
+N/A
+
+"""
+function zero_surface_sources!(this::Source)
+    zero_surface_sources!(this.surface_sources)
+    return nothing
+end
+
+"""
+    zero_point_sources!(this::Source)
+
+Remove all internal point sources from `this` source.
+
+# Input Argument(s)
+- `this::Source` : source structure.
+
+# Output Argument(s)
+N/A
+
+"""
+function zero_point_sources!(this::Source)
+    empty!(this.point_sources)
+    return nothing
+end
+
+"""
+    zero_surface_source_objects!(this::Source)
+
+Remove all surface source objects from `this` source.
+
+# Input Argument(s)
+- `this::Source` : source structure.
+
+# Output Argument(s)
+N/A
+
+"""
+function zero_surface_source_objects!(this::Source)
+    empty!(this.surface_source_objects)
+    return nothing
+end
+
+"""
+    zero_surface_sources!(surface_sources)
+
+Zero out all surface source entries (Float64 or Array), so the second-pass standard
+solve is driven only by the volume source.
+
+# Input Argument(s)
+- `surface_sources::AbstractArray{<:Union{Array{Float64},Float64}}` : surface sources to zero.
+
+# Output Argument(s)
+N/A
+
+# Reference(s)
+N/A
+
+"""
+function zero_surface_sources!(surface_sources::AbstractArray{<:Union{Array{Float64},Float64}})
+    for i in eachindex(surface_sources)
+        if surface_sources[i] isa Float64
+            surface_sources[i] = 0.0
+        else
+            surface_sources[i] .= 0.0
+        end
+    end
 end
 
 """
@@ -241,6 +352,22 @@ Get the volume sources.
 """
 function get_volume_sources(this::Source)
     return this.volume_sources
+end
+
+"""
+    get_surface_source_objects(this::Source)
+
+Get the list of original `Surface_Source` objects added to this source.
+
+# Input Argument(s)
+- `this::Source` : source structure.
+
+# Output Argument(s)
+- `surface_source_objects::Vector{Surface_Source}` : original surface sources.
+
+"""
+function get_surface_source_objects(this::Source)
+    return this.surface_source_objects
 end
 
 """
@@ -326,5 +453,8 @@ function Base.:+(source1::Source,source2::Source)
         Q_1[ig,l+1,i] += Q_2[ig,l+1,i]
     end
     source1.surface_sources = Q_1
+    append!(source1.surface_source_objects, source2.surface_source_objects)
+    append!(source1.point_sources, source2.point_sources)
+    source1.normalization_factor += source2.normalization_factor
     return source1
 end

@@ -34,13 +34,31 @@ if Npart == 1
 
     # Initialization
     particle = solvers.get_particles()[1]
-
-    # Transport
-    method = solvers.get_method(particle)
+    method = solvers.get_method_by_index(1)
     fixed_source = sources.get_source(particle)
 
-    particle_flux = compute_flux(cross_sections,geometry,method,fixed_source,electromagnetic_field)
-    flux.add_flux(particle_flux)
+    if method isa SN && method.get_is_first_collision_source()
+        precursor = _compute_fcs_precursor(cross_sections, geometry, method, fixed_source)
+        if !isnothing(precursor)
+            flux_u, modified_source = precursor
+            flux_s = _compute_flux_sn(cross_sections, geometry, method, modified_source)
+            flux_per_particle = Flux_Per_Particle(particle)
+            flux_per_particle.set_uncollided_flux(flux_u.get_flux())  # store φ_u separately
+            flux_per_particle.add_flux(flux_u.get_flux() + flux_s.get_flux())
+            _, is_CSD = method.get_solver_type()
+            if is_CSD
+                flux_per_particle.add_flux_cutoff(flux_u.get_flux_cutoff() + flux_s.get_flux_cutoff())
+            end
+            flux_per_particle.add_spectral_radius(flux_s.get_spectral_radius())
+            flux.add_flux(flux_per_particle)
+        else
+            particle_flux = _compute_flux_sn(cross_sections, geometry, method, fixed_source)
+            flux.add_flux(particle_flux)
+        end
+    else
+        particle_flux = compute_flux(cross_sections,geometry,method,fixed_source,electromagnetic_field)
+        flux.add_flux(particle_flux)
+    end
 
 #----
 # N-particles coupled transport
@@ -53,9 +71,13 @@ else
     particle_sources = Vector{Source}(undef,Npart)
     method = Vector{Solver}(undef,Npart)
     for i in range(1,Npart)
-        method[i] = solvers.get_method(particles[i])
+        # Use index-based lookup so that multiple solvers can share the same tag.
+        # NOTE: Fixed_Sources.build() still builds the source using the first solver
+        # matching the tag. Multi-solver-per-tag is only safe when all solvers are
+        # source-compatible (same angular/spatial discretization). This is a known gap.
+        method[i] = solvers.get_method_by_index(i)
         fixed_source[i] = sources.get_source(particles[i])
-        particle_sources[i] = Source(particles[i],cross_sections,geometry,method[i])
+        particle_sources[i] = Source(particles[i], cross_sections, geometry, method[i])
     end
 
     # Ordering the particles
@@ -71,6 +93,54 @@ else
             break
         end
         if i == Npart error("No fixed sources are defined.") end
+    end
+
+    #----
+    # FCS precomputation (before the coupled loop)
+    #----
+    # Use a small union container for per-particle FCS ingredients. Access is guarded
+    # by `!isnothing` below, and the inner loop uses `sn_method = method[i]::SN` to
+    # help the compiler narrow the union of SN/GN solvers. The runtime cost is minimal.
+    fcs_data = Vector{Union{Nothing, Tuple{Flux_Per_Particle, Source}}}(undef, Npart)
+    for i in range(1,Npart)
+        if !(method[i] isa SN)
+            println(">>>FCS is only supported for SN solvers; skipping FCS for particle $(get_tag(particles[i])) at index $i.")
+            fcs_data[i] = nothing
+            continue
+        end
+        sn_method = method[i]::SN
+        if sn_method.get_is_first_collision_source()
+            fcs_data[i] = _compute_fcs_precursor(
+                cross_sections, geometry, sn_method, fixed_source[i])
+        else
+            fcs_data[i] = nothing
+        end
+    end
+
+    # Replace fixed sources with Q_FCS-augmented sources, seed φ_u secondaries,
+    # and inject φ_u into the total flux so convergence checks see the full solution.
+    #
+    # Alias note: when multiple solvers share the same particle tag, `fixed_source[i]`
+    # initially points to the same Source object built by `Fixed_Sources.build()` using
+    # the first matching solver. Replacing `fixed_source[i]` here only changes the local
+    # vector slot for FCS-enabled solvers; non-FCS slots continue to reference that
+    # original Source object. This is safe only when all solvers for that tag are
+    # source-compatible (same angular/spatial discretization shape), as documented in
+    # the "Known gap: shared-tag source compatibility" section.
+    for i in range(1,Npart)
+        if !isnothing(fcs_data[i])
+            flux_u_i, modified_source_i = fcs_data[i]
+            fixed_source[i] = modified_source_i
+            # Store φ_u before merging into total flux
+            flux_u_i.set_uncollided_flux(flux_u_i.get_flux())
+            flux.add_flux(flux_u_i)
+            for j in range(1,Npart)
+                if i != j
+                    particle_sources[j] += particle_source(
+                        flux_u_i, cross_sections, geometry, method[i], method[j])
+                end
+            end
+        end
     end
 
     # Coupled transport
@@ -90,8 +160,12 @@ else
             source = particle_sources[i]
             if n == 1 source += fixed_source[i] end
 
-            # Transport
-            particle_flux = compute_flux(cross_sections,geometry,method[i],source,electromagnetic_field)
+            # Transport (FCS flag disabled internally for SN; GN uses standard path)
+            if method[i] isa SN
+                particle_flux = _compute_flux_sn(cross_sections, geometry, method[i], source)
+            else
+                particle_flux = compute_flux(cross_sections,geometry,method[i],source,electromagnetic_field)
+            end
             flux.add_flux(particle_flux)
 
             # Compute scattered particles sources

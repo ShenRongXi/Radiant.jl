@@ -8,6 +8,8 @@ RadiantObject = Union{
     Solvers,
     Surface_Source,
     Volume_Source,
+    Point_Source,
+    AngularDistribution,
     Fixed_Sources,
     Source,
     Sources,

@@ -16,7 +16,7 @@ Calculate and extract the flux solution for a given particle.
 N/A
 
 """
-function flux(cross_sections::Cross_Sections,geometry::Geometry,flux::Flux,particle::Particle)
+function flux(cross_sections::Cross_Sections,geometry::Geometry,flux::Flux,particle::Particle;parallel::Bool=true)
 
 #----
 # Extract geometry data
@@ -30,8 +30,20 @@ Ns = geometry.get_number_of_voxels()
 Ng = cross_sections.get_number_of_groups(particle)
 F = zeros(Ng,Ns[1],Ns[2],Ns[3])
 𝚽l = flux.get_flux(particle)
-for ig in range(1,Ng) ,ix in range(1,Ns[1]), iy in range(1,Ns[2]), iz in range(1,Ns[3])
-    F[ig,ix,iy,iz] = 𝚽l[ig,1,1,ix,iy,iz]
+if parallel && Threads.nthreads() > 1 && Ns[1]*Ns[2]*Ns[3] >= PAR_MIN_NVOXELS
+    @threads :static for I in CartesianIndices((Ns[1], Ns[2], Ns[3]))
+        ix, iy, iz = Tuple(I)
+        for ig in range(1,Ng)
+            F[ig,ix,iy,iz] = 𝚽l[ig,1,1,ix,iy,iz]
+        end
+    end
+else
+    for I in CartesianIndices((Ns[1], Ns[2], Ns[3]))
+        ix, iy, iz = Tuple(I)
+        for ig in range(1,Ng)
+            F[ig,ix,iy,iz] = 𝚽l[ig,1,1,ix,iy,iz]
+        end
+    end
 end
 
 if Ndims == 1

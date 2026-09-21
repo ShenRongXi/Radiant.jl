@@ -1,6 +1,6 @@
 # Radiant
 
-[![Build Status](https://github.com/CBienvenue/Radiant.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/CBienvenue/Radiant.jl/actions/workflows/CI.yml?query=branch%3Amain) [![](https://img.shields.io/badge/Documentation-stable-blue.svg)](https://cbienvenue.github.io/Radiant.jl/)
+[![Build Status](https://github.com/ShenRongXi/Radiant.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/ShenRongXi/Radiant.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
 Radiant is a package that performs deterministic transport of ionizing radiation in matter. It specializes in the coupled transport of photons, electrons, and positrons with kinetic energies between 1 keV and 900 MeV.
 
@@ -42,6 +42,14 @@ For a detailed account of the theory and the features of the Radiant package, pl
 - **Energy discretization** : Multigroup method | Continuous slowing-down discretization (same as spatial)
 - **Angular Fokker-Planck discretization** : Moment-preserving | Finite-difference
 - **Acceleration methods** : Livolant, Anderson, GMRES, BICGSTAB
+
+## First-Collision-Source Extension
+
+This repository extends [Radiant](https://github.com/CBienvenue/Radiant.jl) with a first-collision-source (FCS) capability for the discrete-ordinates solution of the Boltzmann transport equation (BTE) and the Boltzmann--Fokker--Planck (BFP) equation:
+
+- Surface-beam sources: uncollided flux advanced along beam directions with an along-characteristic discontinuous Galerkin energy discretization (flat-source and linear-source schemes).
+- External point sources: ray tracing from the source to grid vertices, with the BFP attenuation along each ray segment evaluated by a numerically stable ray matrix-exponential kernel.
+- Coupled electron--photon transport via FCS-seeded secondary-particle sources.
 
 ## Examples
 

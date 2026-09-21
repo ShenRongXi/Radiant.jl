@@ -796,7 +796,7 @@ Get the number of groups for a specified particle.
 
 """
 function get_number_of_groups(this::Cross_Sections,particle::Particle)
-    index = findfirst(x -> x == particle,this.get_particles())
+    index = findfirst(x -> get_tag(x) == get_tag(particle),this.get_particles())
     if isnothing(index) error("Cross-sections don't contain data for the given particle.") end
     return this.number_of_groups[index]
 end
@@ -815,7 +815,7 @@ Get the energy boundaries for a specified particle.
 
 """
 function get_energy_boundaries(this::Cross_Sections,particle::Particle)
-    index = findfirst(x -> x == particle,this.get_particles())
+    index = findfirst(x -> get_tag(x) == get_tag(particle),this.get_particles())
     if isnothing(index) error("Cross-sections don't contain data for the given particle.") end
     return this.energy_boundaries[index]
 end
@@ -871,7 +871,7 @@ Get the absorption cross-sections for a specified particle.
 """
 function get_absorption(this::Cross_Sections,particle::Particle)
     if ismissing(this.multigroup_cross_sections) error("Unable to get multigroup cross-sections. Missing data.") end
-    index_particle = findfirst(x -> x == particle,this.get_particles())
+    index_particle = findfirst(x -> get_tag(x) == get_tag(particle),this.get_particles())
     if isnothing(index_particle) error("Cross-sections don't contain data for the given particle.") end
     Nmat = this.get_number_of_materials()
     Ng = this.get_number_of_groups(particle)
@@ -897,7 +897,7 @@ Get the total cross-sections for a specified particle.
 """
 function get_total(this::Cross_Sections,particle::Particle)
     if ismissing(this.multigroup_cross_sections) error("Unable to get multigroup cross-sections. Missing data.") end
-    index_particle = findfirst(x -> x == particle,this.get_particles())
+    index_particle = findfirst(x -> get_tag(x) == get_tag(particle),this.get_particles())
     if isnothing(index_particle) error("Cross-sections don't contain data for the given particle.") end
     Nmat = this.get_number_of_materials()
     Ng = this.get_number_of_groups(particle)
@@ -927,8 +927,8 @@ outgoing particle.
 """
 function get_scattering(this::Cross_Sections,particle_in::Particle,particle_out::Particle,legendre_order::Int64)
     if ismissing(this.multigroup_cross_sections) error("Unable to get multigroup scattering cross-sections. Missing data.") end
-    index_particle_in = findfirst(x -> x == particle_in,this.get_particles())
-    index_particle_out = findfirst(x -> x == particle_out,this.get_particles())
+    index_particle_in = findfirst(x -> get_tag(x) == get_tag(particle_in),this.get_particles())
+    index_particle_out = findfirst(x -> get_tag(x) == get_tag(particle_out),this.get_particles())
     if isnothing(index_particle_in) || isnothing(index_particle_out) error("Cross-sections don't contain data for the given particle.") end
     Nmat = this.get_number_of_materials()
     Ngi = this.get_number_of_groups(particle_in)
@@ -956,7 +956,7 @@ Get the stopping powers at group boundaries for a specified particle.
 """
 function get_boundary_stopping_powers(this::Cross_Sections,particle::Particle)
     if ismissing(this.multigroup_cross_sections) error("Unable to get multigroup stopping powers. Missing data.") end
-    index_particle = findfirst(x -> x == particle,this.get_particles())
+    index_particle = findfirst(x -> get_tag(x) == get_tag(particle),this.get_particles())
     if isnothing(index_particle) error("Cross-sections don't contain data for the given particle.") end
     Nmat = this.get_number_of_materials()
     Ng = this.get_number_of_groups(particle)
@@ -982,7 +982,7 @@ Get the stopping powers for a specified particle.
 """
 function get_stopping_powers(this::Cross_Sections,particle::Particle)
     if ismissing(this.multigroup_cross_sections) error("Unable to get multigroup stopping powers. Missing data.") end
-    index_particle = findfirst(x -> x == particle,this.get_particles())
+    index_particle = findfirst(x -> get_tag(x) == get_tag(particle),this.get_particles())
     if isnothing(index_particle) error("Cross-sections don't contain data for the given particle.") end
     Nmat = this.get_number_of_materials()
     Ng = this.get_number_of_groups(particle)
@@ -1008,7 +1008,7 @@ Get the momentum transfers for a specified particle.
 """
 function get_momentum_transfer(this::Cross_Sections,particle::Particle)
     if ismissing(this.multigroup_cross_sections) error("Unable to get multigroup momentum transfer. Missing data.") end
-    index_particle = findfirst(x -> x == particle,this.get_particles())
+    index_particle = findfirst(x -> get_tag(x) == get_tag(particle),this.get_particles())
     if isnothing(index_particle) error("Cross-sections don't contain data for the given particle.") end
     Nmat = this.get_number_of_materials()
     Ng = this.get_number_of_groups(particle)
@@ -1034,7 +1034,7 @@ Get the energy deposition cross-sections for a specified particle.
 """
 function get_energy_deposition(this::Cross_Sections,particle::Particle)
     if ismissing(this.multigroup_cross_sections) error("Unable to get multigroup momentum transfer. Missing data.") end
-    index_particle = findfirst(x -> x == particle,this.get_particles())
+    index_particle = findfirst(x -> get_tag(x) == get_tag(particle),this.get_particles())
     if isnothing(index_particle) error("Cross-sections don't contain data for the given particle.") end
     Nmat = this.get_number_of_materials()
     Ng = this.get_number_of_groups(particle)
@@ -1060,7 +1060,7 @@ Get the charge deposition cross-sections for a specified particle.
 """
 function get_charge_deposition(this::Cross_Sections,particle::Particle)
     if ismissing(this.multigroup_cross_sections) error("Unable to get multigroup momentum transfer. Missing data.") end
-    index_particle = findfirst(x -> x == particle,this.get_particles())
+    index_particle = findfirst(x -> get_tag(x) == get_tag(particle),this.get_particles())
     if isnothing(index_particle) error("Cross-sections don't contain data for the given particle.") end
     Nmat = this.get_number_of_materials()
     Ng = this.get_number_of_groups(particle)

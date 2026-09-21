@@ -324,6 +324,27 @@ function get_flux(this::Computation_Unit,particle::Particle)
 end
 
 """
+    get_uncollided_flux(this::Computation_Unit,particle::Particle)
+
+Get the uncollided (first-collision) flux for a given particle.
+Returns the φ_u component stored by the FCS path during transport.
+The raw 6D array `[Ng, Np, Nm, Nx, Ny, Nz]` is returned as an internal
+reference (read-only). To extract the scalar flux, index `[:, 1, 1, :, :, :]`.
+
+# Input Argument(s)
+- `this::Computation_Unit` : computation unit.
+- `particle::Particle` : particle.
+
+# Output Argument(s)
+- `uncollided_flux::Array{Float64,6}` : uncollided flux (internal reference, read-only).
+"""
+function get_uncollided_flux(this::Computation_Unit,particle::Particle)
+    if ismissing(this.flux) error("No computed flux in this computation unit. To extract flux, please use .run() method before.") end
+    if get_tag(particle) ∉ get_tag.(this.flux.get_particles()) error("Flux for the specified particle is not available.") end
+    return this.flux.get_uncollided_flux(particle)
+end
+
+"""
     get_spectral_radius(this::Computation_Unit,particle::Particle)
 
 Get the estimated in-group spectral radius, per energy group, of the in-group iteration for the

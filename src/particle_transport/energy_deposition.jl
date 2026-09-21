@@ -21,7 +21,7 @@ Calculate and extract the energy deposition.
   Solving the Boltzmann-Fokker-Planck Equation.
 
 """
-function energy_deposition(cross_sections::Cross_Sections,geometry::Geometry,solvers::Solvers,sources::Fixed_Sources,flux::Flux,particles::Vector{<:Particle})
+function energy_deposition(cross_sections::Cross_Sections,geometry::Geometry,solvers::Solvers,sources::Fixed_Sources,flux::Flux,particles::Vector{<:Particle};parallel::Bool=true)
 
 #----
 # Extract geometry data
@@ -62,17 +62,30 @@ for part in particles
     #----
     # Energy deposition calculations
     #----
-    for ix in range(1,Ns[1]), iy in range(1,Ns[2]), iz in range(1,Ns[3])
-
-        # In-group energy deposition
-        for ig in range(1,Ng)
-            D[ix,iy,iz] += Σe[ig,mat[ix,iy,iz]] * 𝚽l[ig,1,1,ix,iy,iz]
+    Nxyz = Ns[1] * Ns[2] * Ns[3]
+    if parallel && Threads.nthreads() > 1 && Nxyz >= PAR_MIN_NVOXELS
+        @threads :static for I in CartesianIndices((Ns[1], Ns[2], Ns[3]))
+            ix, iy, iz = Tuple(I)
+            for ig in range(1,Ng)
+                D[ix,iy,iz] += Σe[ig,mat[ix,iy,iz]] * 𝚽l[ig,1,1,ix,iy,iz]
+            end
+            if isCSD D[ix,iy,iz] += Σe[Ng+1,mat[ix,iy,iz]] * 𝚽cutoff[1,1,ix,iy,iz] end
+            D[ix,iy,iz] /= ρ[mat[ix,iy,iz]] * norm
         end
-        if isCSD D[ix,iy,iz] += Σe[Ng+1,mat[ix,iy,iz]] * 𝚽cutoff[1,1,ix,iy,iz] end
+    else
+        for I in CartesianIndices((Ns[1], Ns[2], Ns[3]))
+            ix, iy, iz = Tuple(I)
 
-        # Normalization
-        D[ix,iy,iz] /= ρ[mat[ix,iy,iz]] * norm
+            # In-group energy deposition
+            for ig in range(1,Ng)
+                D[ix,iy,iz] += Σe[ig,mat[ix,iy,iz]] * 𝚽l[ig,1,1,ix,iy,iz]
+            end
+            if isCSD D[ix,iy,iz] += Σe[Ng+1,mat[ix,iy,iz]] * 𝚽cutoff[1,1,ix,iy,iz] end
 
+            # Normalization
+            D[ix,iy,iz] /= ρ[mat[ix,iy,iz]] * norm
+
+        end
     end
     Dtot += D
 end

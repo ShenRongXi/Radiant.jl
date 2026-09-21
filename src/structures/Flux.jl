@@ -104,6 +104,25 @@ function get_flux_cutoff(this::Flux,particle::Particle)
 end
 
 """
+    get_uncollided_flux(this::Flux,particle::Particle)
+
+Get the uncollided (first-collision) flux for a given particle.
+Returns the φ_u component stored by the FCS path during transport.
+
+# Input Argument(s)
+- `this::Flux` : structure to contain flux solutions.
+- `particle::Particle` : particle.
+
+# Output Argument(s)
+- `uncollided_flux::Array{Float64,6}` : uncollided flux.
+"""
+function get_uncollided_flux(this::Flux,particle::Particle)
+    if get_tag(particle) ∉ get_tag.(this.particles) error("No data for the specified particle.") end
+    index = findfirst(x -> get_tag(x) == get_tag(particle),this.particles)
+    return this.flux_per_particle[index].get_uncollided_flux()
+end
+
+"""
     get_spectral_radius(this::Flux,particle::Particle)
 
 Get the per-energy-group in-group spectral-radius estimate for a given particle.

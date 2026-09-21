@@ -38,8 +38,7 @@ function bhabha(Zi::Real,Ei::Float64,W::Float64)
 end
 
 """
-    integrate_bhabha(Z::Int64,Ei::Float64,n::Int64,W⁻min::Float64=0.0,
-    is_subshells::Bool=true)
+    integrate_bhabha(Z::Int64,Ei::Float64,n::Int64,Wmin::Float64=1e-5,Wmax::Float64=Ei)
 
 Gives the integration of the Bhabha differential cross-sections multiplied by Wⁿ.
 
@@ -47,8 +46,7 @@ Gives the integration of the Bhabha differential cross-sections multiplied by W�
 - `Zi::Real` : number of electron(s).
 - `Ei::Float64` : incoming particle energy.
 - `n::Int64` : order of the energy-loss factor.
-- `W⁻min::Float64` : minimum energy loss W of the incoming positron.
-- `is_subshells::Bool` : boolean indicating if bounded subshells are resolved.
+- `E⁻min::Float64` : minimum energy of the knock-on electron.
 
 # Output Argument(s)
 - `σn::Float64` : integrated Bhabha cross-sections.
@@ -60,28 +58,28 @@ Gives the integration of the Bhabha differential cross-sections multiplied by W�
   electron transport used in Monte Carlo codes.
 
 """
-function integrate_bhabha(Z::Int64,Ei::Float64,n::Int64,W⁻min::Float64=0.0,is_subshells::Bool=true)
-  Nshells,Zi,Ui,_,_,_ = electron_subshells(Z,~is_subshells)
+function integrate_bhabha(Z::Int64,Ei::Float64,n::Int64,E⁻min::Float64=0.0)
+  Nshells,Zi,Ui,_,_,_ = electron_subshells(Z)
   σn = 0
   for δi in range(1,Nshells)
-      σn += Zi[δi] * integrate_bhabha_per_subshell(Z,Ei,n,Ui[δi],W⁻min)
+      σn += Zi[δi] * integrate_bhabha_per_subshell(Z,Ei,n,Ui[δi],E⁻min)
   end
   return σn
 end
 
 """
     integrate_bhabha_per_subshell(Z::Int64,Ei::Float64,n::Int64,Ui::Float64,
-    W⁻min::Float64=0.0)
+    Wmin::Float64=1e-5,Wmax::Float64=Ei)
 
 Gives the integration of the Bhabha differential cross-sections for an electron with a given
-binding energy, multiplied by Wⁿ, over W ∈ [max(W⁻min,Ui),Ei].
+binding energy, multiplied by Wⁿ.
 
 # Input Argument(s)
 - `Zi::Real` : number of electron(s).
 - `Ei::Float64` : incoming particle energy.
 - `n::Int64` : order of the energy-loss factor.
 - `Ui::Float64` : binding energy of the subshell.
-- `W⁻min::Float64` : minimum energy loss W of the incoming positron.
+- `E⁻min::Float64` : minimum energy of the knock-on electron.
 
 # Output Argument(s)
 - `σni::Float64` : integrated Bhabha cross-sections in a given subshell.
@@ -95,7 +93,7 @@ binding energy, multiplied by Wⁿ, over W ∈ [max(W⁻min,Ui),Ei].
   electron transport used in Monte Carlo codes.
 
 """
-function integrate_bhabha_per_subshell(Z::Int64,Ei::Float64,n::Int64,Ui::Float64,W⁻min::Float64=0.0)
+function integrate_bhabha_per_subshell(Z::Int64,Ei::Float64,n::Int64,Ui::Float64,E⁻min::Float64=0.0)
 
     # Varibles
     rₑ = 2.81794092E-13       # (in cm)
@@ -110,7 +108,7 @@ function integrate_bhabha_per_subshell(Z::Int64,Ei::Float64,n::Int64,Ui::Float64
     # Compute the Bhabha cross-section per subshell
     σni = 0
     W⁺ = Ei
-    W⁻ = max(W⁻min,Ui)
+    W⁻ = E⁻min+Ui
     if W⁺ > W⁻
         if n == 0
           J₀(W) = -1/W - b1*log(W)/Ei + b2*W/Ei^2 - b3*W^2/(2*Ei^3) + b4*W^3/(3*Ei^4)

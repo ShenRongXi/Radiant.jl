@@ -6,8 +6,22 @@ module Radiant
     import Base.println
     using Printf: @sprintf
     using LinearAlgebra
+    using Base.Threads
     using JLD2
     using SpecialFunctions
+
+    #----
+    # Threading initialization
+    #----
+    # When Radiant is run with multiple Julia threads, the SN solver parallelizes the
+    # discrete-ordinates sweep and source terms. Pin BLAS to a single thread to avoid
+    # oversubscription between Julia threads and a multithreaded BLAS. `__init__` runs
+    # after the module is fully loaded, independent of its textual position here.
+    function __init__()
+        if Threads.nthreads() > 1
+            BLAS.set_num_threads(1)
+        end
+    end
 
     #----
     # Include files
@@ -66,6 +80,7 @@ module Radiant
         "elastic_scattering_endf.jl"
     ]
     radiant_src["particle_transport/"] = [
+        "threading_constants.jl",
         "geometry.jl",
         "volume_source.jl",
         "surface_source.jl",
@@ -79,9 +94,13 @@ module Radiant
         "fokker_planck_finite_difference_gn.jl",
         "electromagnetic_scattering_matrix.jl",
         "transport.jl",
-        "transport_fast_context.jl",
         "sn_inner_pass.jl",
+        "ray_moc_kernel.jl",
+        "ray_sweep_1D.jl",
+        "ray_sweep_3D.jl",
+        "uncollided_flux.jl",
         "sn_flux.jl",
+        "sn_flux_fcs.jl",
         "sn_one_speed.jl",
         "sn_sweep_1D.jl",
         "sn_sweep_2D.jl",
@@ -139,10 +158,13 @@ module Radiant
         "Cross_Sections.jl",
         "Geometry.jl",
         "SN.jl",
+        "SN_Angular_Discretization.jl",
         "DPN.jl",
         "GN.jl",
         "CP.jl",
         "Solvers.jl",
+        "AngularDistribution.jl",
+        "Point_Source.jl",
         "Surface_Source.jl",
         "Volume_Source.jl",
         "Source.jl",
@@ -198,7 +220,7 @@ module Radiant
     #----
     export Particle, Photon, Electron, Positron, Proton, Antiproton, Alpha, Muon, Antimuon
     export Elastic_Collision,Elastic_Scattering,Inelastic_Collision,Bremsstrahlung,Compton,Pair_Production,Photoelectric,Annihilation,Rayleigh,Relaxation,Fluorescence,Auger
-    export Material,Cross_Sections,Geometry,SN,Solvers,Surface_Source,Volume_Source,Fixed_Sources,Computation_Unit,DPN,GN,CP,Electromagnetic_Field
+    export Material,Cross_Sections,Geometry,SN,Solvers,Surface_Source,Volume_Source,Point_Source,AngularDistribution,Source,Fixed_Sources,Computation_Unit,DPN,GN,CP,Electromagnetic_Field,SN_Angular_Discretization
     export Discrete_Ordinates  # backward-compatible alias for SN
 
     #----

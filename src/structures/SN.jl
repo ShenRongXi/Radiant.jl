@@ -18,8 +18,15 @@ Structure used to define the discretization method associated with the transport
 - `convergence_criterion::Float64 = 1e-7` : convergence criterion of in-group iterations.
 - `maximum_iteration::Int64 = 300` : maximum number of in-group iterations.
 - `acceleration::Int64 = "none"` : acceleration method for the in-group iterations.
-- `fast_path::Bool = false` : use the optimized solver chain (`sn_one_speed_fast` and below)
-  instead of the reference one. Numerically equivalent; see `set_fast_path`.
+- `use_ray_sweep::Bool = true` : whether the FCS uncollided surface-flux sweep uses the ray/MOC path.
+- `fcs_ray_spatial_order::Int64 = 0` : spatial order used by the FCS uncollided ray sweep
+  (1D `ray_sweep_1D`, or the along-axis order of 3D `ray_sweep_3D` for axis-aligned beams).
+  A value of `0` means the solver's spatial order is used.
+- `force_ray_sweep::Bool = false` : when `true`, allow `ray_sweep_3D` for the uncollided
+  surface-flux sweep even when the solver's transverse spatial orders are > 1. The
+  uncollided flux of an axis-aligned beam has no transverse variation, so internally
+  clamping the transverse orders to 1 for the uncollided sweep is exact. The collision
+  SN solve retains the solver's spatial orders unchanged. Has no effect in 1D or 2D.
 
 """
 mutable struct SN
@@ -41,7 +48,10 @@ mutable struct SN
     gmres_restart              ::Int64
     anderson_depth             ::Int64
     isFC                       ::Bool
-    fast_path                  ::Bool
+    is_first_collision_source  ::Bool
+    use_ray_sweep              ::Bool
+    fcs_ray_spatial_order      ::Int64
+    force_ray_sweep             ::Bool
 
     # Constructor(s)
     function SN()
@@ -54,7 +64,7 @@ mutable struct SN
         this.legendre_order = 64
         this.angular_fokker_planck = "finite-difference"
         this.angular_boltzmann = "galerkin-d"
-        this.convergence_criterion = 1e-7 
+        this.convergence_criterion = 1e-7
         this.maximum_iteration = 300
         this.scheme_type = Dict{String,String}()
         this.scheme_order = Dict{String,Int64}()
@@ -62,7 +72,10 @@ mutable struct SN
         this.gmres_restart = 30
         this.anderson_depth = 3
         this.isFC = true
-        this.fast_path = false
+        this.is_first_collision_source = false
+        this.use_ray_sweep = true
+        this.fcs_ray_spatial_order = 0
+        this.force_ray_sweep = false
         return this
     end
 end
@@ -71,6 +84,146 @@ end
 const Discrete_Ordinates = SN
 
 # Method(s)
+"""
+    set_is_first_collision_source(this::SN,flag::Bool)
+
+To set whether the first collision source (FCS) method is used for the SN solve.
+
+# Input Argument(s)
+- `this::SN` : discretization method.
+- `flag::Bool` : `true` to enable FCS, `false` to disable.
+
+# Output Argument(s)
+N/A
+
+"""
+function set_is_first_collision_source(this::SN,flag::Bool)
+    this.is_first_collision_source = flag
+end
+
+"""
+    get_is_first_collision_source(this::SN)
+
+To get whether the first collision source (FCS) method is used for the SN solve.
+
+# Input Argument(s)
+- `this::SN` : discretization method.
+
+# Output Argument(s)
+- `flag::Bool` : `true` if FCS is enabled, `false` otherwise.
+
+"""
+function get_is_first_collision_source(this::SN)
+    return this.is_first_collision_source
+end
+
+"""
+    set_use_ray_sweep(this::SN, flag::Bool)
+
+Set whether the FCS uncollided surface-flux sweep uses the ray/MOC path (`true`)
+or the standard SN sweep path (`false`).
+
+# Input Argument(s)
+- `this::SN` : discretization method.
+- `flag::Bool` : `true` for ray sweep, `false` for SN sweep.
+
+# Output Argument(s)
+N/A
+"""
+function set_use_ray_sweep(this::SN, flag::Bool)
+    this.use_ray_sweep = flag
+end
+
+"""
+    get_use_ray_sweep(this::SN)
+
+Get whether the FCS uncollided surface-flux sweep uses the ray/MOC path.
+
+# Input Argument(s)
+- `this::SN` : discretization method.
+
+# Output Argument(s)
+- `flag::Bool` : `true` if ray sweep is enabled, `false` otherwise.
+"""
+function get_use_ray_sweep(this::SN)
+    return this.use_ray_sweep
+end
+
+"""
+    set_fcs_ray_spatial_order(this::SN, order::Int64)
+
+Set the spatial order used by the FCS uncollided ray sweep.
+
+This setting affects the 1D `ray_sweep_1D` path and, in 3D, the axis-aligned-beam
+`ray_sweep_3D` path (along-axis order only; transverse orders must already be 1),
+when `use_ray_sweep` is enabled. For `use_ray_sweep=false`, 2D problems, 3D beams
+not swept by `ray_sweep_3D`, or when `order == 0` or `order >=` the solver's
+spatial order along the sweep axis, the solver behaves as if mixed-order is
+disabled.
+
+# Input Argument(s)
+- `this::SN` : discretization method.
+- `order::Int64` : spatial order for the FCS uncollided ray sweep. Use `0` to keep the
+  solver's spatial order.
+
+# Output Argument(s)
+N/A
+
+"""
+function set_fcs_ray_spatial_order(this::SN, order::Int64)
+    if order < 0 error("fcs_ray_spatial_order must be non-negative.") end
+    this.fcs_ray_spatial_order = order
+end
+
+"""
+    get_fcs_ray_spatial_order(this::SN)
+
+Get the spatial order used by the FCS uncollided ray sweep (1D, or along-axis in 3D).
+
+# Input Argument(s)
+- `this::SN` : discretization method.
+
+# Output Argument(s)
+- `order::Int64` : spatial order for the FCS uncollided ray sweep. A value of `0` means
+  the solver's spatial order is used.
+
+"""
+function get_fcs_ray_spatial_order(this::SN)
+    return this.fcs_ray_spatial_order
+end
+
+"""
+    set_force_ray_sweep(this::SN, flag::Bool)
+
+Set whether to force ray/MOC sweep for the uncollided surface flux in 3D even when
+the solver's transverse spatial orders are > 1.
+
+# Input Argument(s)
+- `this::SN` : discretization method.
+- `flag::Bool` : `true` to force ray sweep, `false` otherwise.
+
+# Output Argument(s)
+N/A
+"""
+function set_force_ray_sweep(this::SN, flag::Bool)
+    this.force_ray_sweep = flag
+end
+
+"""
+    get_force_ray_sweep(this::SN)
+
+Get whether ray/MOC sweep is forced for the uncollided surface flux in 3D.
+
+# Input Argument(s)
+- `this::SN` : discretization method.
+
+# Output Argument(s)
+- `flag::Bool` : `true` if forced, `false` otherwise.
+"""
+function get_force_ray_sweep(this::SN)
+    return this.force_ray_sweep
+end
+
 """
     set_particle(this::SN,particle::Particle)
 
@@ -222,6 +375,8 @@ To set the angular discretization method for the Boltzmann operator.
     - `angular_boltzmann = "standard"` : standard discrete ordinates (SN) method.
     - `angular_boltzmann = "galerkin-m"` : Galerkin method by inversion of the discrete-to-moment M matrix.
     - `angular_boltzmann = "galerkin-d"` : Galerkin method by inversion of the moment-to-discrete D matrix.
+    - `angular_boltzmann = "galerkin-direct"` : Galerkin-D in the volume, with direct
+      collocation of a 1D Gauss-Lobatto surface source that lies exactly on a quadrature node.
 
 # Output Argument(s)
 N/A
@@ -233,7 +388,7 @@ julia> m.set_angular_boltzmann("standard")
 ```
 """
 function set_angular_boltzmann(this::SN,angular_boltzmann::String)
-    if angular_boltzmann ∉ ["standard","galerkin-m","galerkin-d","galerkin"] error("Unkown method to deal with the Boltzmann kernel.") end
+    if angular_boltzmann ∉ ["standard","galerkin-m","galerkin-d","galerkin","galerkin-direct"] error("Unkown method to deal with the Boltzmann kernel.") end
     if (angular_boltzmann == "galerkin") angular_boltzmann = "galerkin-d" end
     this.angular_boltzmann = angular_boltzmann
 end
@@ -548,6 +703,24 @@ function get_schemes(this::SN,geometry::Geometry,isFC::Bool)
 end
 
 """
+    get_scheme_type(this::SN,axis::String)
+
+Get the discretization scheme type (e.g. "DD", "DG") along a given axis ("x","y","z","E").
+
+# Input Argument(s)
+- `this::SN` : discretization method.
+- `axis::String` : axis identifier.
+
+# Output Argument(s)
+- `scheme_type::String` : scheme type along `axis`.
+
+"""
+function get_scheme_type(this::SN,axis::String)
+    if ~haskey(this.scheme_type,axis) error("Scheme type is not defined along ",axis,"-axis.") end
+    return this.scheme_type[axis]
+end
+
+"""
     get_convergence_criterion(this::SN)
 
 Get the convergence criterion for in-group iteration convergence.
@@ -715,57 +888,4 @@ Get the quadrature dimension.
 """
 function get_quadrature_dimension(this::SN)
     return this.quadrature_dimension
-end
-"""
-    set_fast_path(this::SN,fast_path::Bool)
-
-Enable or disable the optimized solver chain (`fast_path = false` by default).
-
-The optimized chain computes the same solution as the reference one — the cell systems are
-assembled by the same code and factorized by the same `lu!` — but it does the work the
-reference repeats per voxel only once: the factorizations are cached per (material,
-mesh-width combination, direction), the half-range and moment transforms are lifted out of
-the cell loop, and the direction sweeps run in parallel.
-
-It covers the BTE and BFP solvers in 1D, 2D and 3D, and falls back to the reference chain,
-with a message, on anything it does not cover — in particular the adaptive (AWD) schemes,
-whose closure weights are recomputed per cell and make the cell system voxel-dependent. See
-`sn_fast_applicable`.
-
-# Input Argument(s)
-- `this::SN` : discrete-ordinates solver.
-- `fast_path::Bool` : whether to use the optimized solver chain.
-
-# Output Argument(s)
-N/A
-
-# Examples
-```jldoctest
-julia> m = SN()
-julia> m.set_fast_path(true)
-```
-"""
-function set_fast_path(this::SN,fast_path::Bool)
-    this.fast_path = fast_path
-end
-
-"""
-    get_fast_path(this::SN)
-
-Whether the optimized solver chain is enabled.
-
-# Input Argument(s)
-- `this::SN` : discrete-ordinates solver.
-
-# Output Argument(s)
-- `fast_path::Bool` : whether the optimized solver chain is enabled.
-
-# Examples
-```jldoctest
-julia> m = SN()
-julia> m.get_fast_path()
-```
-"""
-function get_fast_path(this::SN)
-    return this.fast_path
 end

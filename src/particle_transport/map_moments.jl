@@ -39,7 +39,7 @@ for ix in range(1,𝒪i[1]), iy in range(1,𝒪i[2]), iz in range(1,𝒪i[3]), i
     M[ix,iy,iz,iE] = i
 end
 
-for ix in range(1,𝒪f[1]), iy in range(1,𝒪f[2]), iz in range(1,𝒪f[3]), iE in range(1,𝒪f[4][1])
+for ix in range(1,𝒪f[1]), iy in range(1,𝒪f[2]), iz in range(1,𝒪f[3]), iE in range(1,𝒪f[4])
     if isFC_out
         i = 𝒪f[2]*𝒪f[1]*𝒪f[4]*(iz-1)+𝒪f[1]*𝒪f[4]*(iy-1)+𝒪f[4]*(ix-1)+iE
     else

@@ -1,5 +1,5 @@
 """
-    compute_sweep_2D(𝚽l::Array{Float64,4},Ql::Array{Float64,4},Σt::Vector{Float64},
+    compute_sweep_2D(𝚽l::AbstractArray{Float64,4},Ql::AbstractArray{Float64,4},Σt::Vector{Float64},
     mat::Array{Int64,2},Ns::Vector{Int64},Δs::Vector{Vector{Float64}},Ω::Vector{Float64},
     Mn::Vector{Float64},Dn::Vector{Float64},P::Int64,Mnx⁻::Vector{Float64},
     Dnx⁻::Vector{Float64},Mny⁻::Vector{Float64},Dny⁻::Vector{Float64},Np_surf::Int64,
@@ -11,8 +11,8 @@
 Compute the flux solution along one direction in 2D geometry.
 
 # Input Argument(s)
-- `𝚽l::Array{Float64,4}`: Legendre components of the in-cell flux.
-- `Ql::Array{Float64,4}`: Legendre components of the in-cell source.
+- `𝚽l::AbstractArray{Float64,4}`: Legendre components of the in-cell flux.
+- `Ql::AbstractArray{Float64,4}`: Legendre components of the in-cell source.
 - `Σt::Vector{Float64}`: total cross-sections.
 - `mat::Array{Int64,2}`: material identifier per voxel.
 - `Ns::Vector{Int64}`: number of voxels along x- and y-axis.
@@ -51,7 +51,7 @@ Compute the flux solution along one direction in 2D geometry.
 N/A
 
 """
-function sn_sweep_2D(𝚽l::Array{Float64,4},Ql::Array{Float64,4},Σt::Vector{Float64},mat::Array{Int64,2},Ns::Vector{Int64},Δs::Vector{Vector{Float64}},Ω::Vector{Float64},Mn::Vector{Float64},Dn::Vector{Float64},P::Int64,Mnx⁻::Vector{Float64},Dnx⁻::Vector{Float64},Mny⁻::Vector{Float64},Dny⁻::Vector{Float64},Np_surf::Int64,𝒪::Vector{Int64},Nm::Vector{Int64},C::Vector{Float64},ω::Vector{Array{Float64}},sources::Matrix{Union{Float64,Array{Float64}}},isAdapt::Bool,isCSD::Bool,ΔE::Float64,𝚽E12::Array{Float64},S⁻::Vector{Float64},S⁺::Vector{Float64},S::Array{Float64},𝒲::Array{Float64},isFC::Bool,𝚽x12⁻,𝚽y12⁻,boundary_conditions,Np_source)
+function sn_sweep_2D(𝚽l::AbstractArray{Float64,4},Ql::AbstractArray{Float64,4},Σt::Vector{Float64},mat::Array{Int64,2},Ns::Vector{Int64},Δs::Vector{Vector{Float64}},Ω::Vector{Float64},Mn::Vector{Float64},Dn::Vector{Float64},P::Int64,Mnx⁻::Vector{Float64},Dnx⁻::Vector{Float64},Mny⁻::Vector{Float64},Dny⁻::Vector{Float64},Np_surf::Int64,𝒪::Vector{Int64},Nm::Vector{Int64},C::Vector{Float64},ω::Vector{Array{Float64}},sources::Matrix{Union{Float64,Array{Float64}}},isAdapt::Bool,isCSD::Bool,ΔE::Float64,𝚽E12::Array{Float64},S⁻::Vector{Float64},S⁺::Vector{Float64},S::Array{Float64},𝒲::Array{Float64},isFC::Bool,𝚽x12⁻,𝚽y12⁻,boundary_conditions,Np_source)
 
     # Initialization
     𝒪x = 𝒪[1]; 𝒪y = 𝒪[2]; 𝒪E = 𝒪[4]
@@ -181,79 +181,4 @@ function sn_sweep_2D(𝚽l::Array{Float64,4},Ql::Array{Float64,4},Σt::Vector{Fl
         end
     end
     return 𝚽l, 𝚽E12, 𝚽x12⁺, 𝚽y12⁺
-end
-"""
-    sn_sweep_2D_fast!(𝚿,o𝚿,Ql,Mnn,Np,𝚽E12,𝚽E12o,oE,mat,Nx,Ny,srcx,srcy,outx,outy,mom,cells,
-    d,ws,Nmf,NmEf,isCSD,do_E,zero_E,save_out)
-
-Optimized counterpart of `sn_sweep_2D`: sweep the spatial grid along one discrete ordinate.
-
-Identical in structure to `sn_sweep_3D_fast!` minus the z axis; see it for the four changes to
-the reference — no per-cell weight copies, moving buffers instead of boundary slices, the
-half-range transform lifted out of the sweep, and the moment transforms deferred to the caller.
-
-The loop nesting is `iy` outer, `ix` inner, so the innermost index is the fastest one of the
-arrays; `bufy` spans the x line and `bufx` is a single face.
-"""
-function sn_sweep_2D_fast!(𝚿::Vector{Float64},o𝚿::Int64,Ql::Vector{Float64},Mnn::Vector{Float64},Np::Int64,𝚽E12::Vector{Float64},𝚽E12o::Vector{Float64},oE::Int64,mat::Array{Int64,3},Nx::Int64,Ny::Int64,srcx::Vector{Float64},srcy::Vector{Float64},outx::Vector{Float64},outy::Vector{Float64},mom::GNFastMoments{NMOM},cells::GNFastCells,d::SNFastDir{NMOM},ws::GNFastWorkspace,Nmf::Vector{Int64},NmEf::Int64,isCSD::Bool,do_E::Bool,zero_E::Bool,save_out::Bool) where {NMOM}
-
-    sx = d.sx; sy = d.sy
-    Nm1 = Nmf[1]; Nm2 = Nmf[2]
-    if sx > 0; x_sweep = 1:Nx else x_sweep = Nx:-1:1 end
-    if sy > 0; y_sweep = 1:Ny else y_sweep = Ny:-1:1 end
-
-    bufx = ws.bufx; bufy = ws.bufy
-    fill!(bufy, 0.0)
-
-    @inbounds for iy in y_sweep
-        fill!(bufx, 0.0)
-        iky = Int64(cells.ky[iy])
-        is_y_entry = (iy == 1 && sy > 0) || (iy == Ny && sy < 0)
-        is_y_exit  = save_out && ((iy == Ny && sy > 0) || (iy == 1 && sy < 0))
-
-        # Y-boundary initialization (at the iy entrance line only)
-        if is_y_entry
-            for i in 1:Nm2*Nx
-                bufy[i] += srcy[i]
-            end
-        end
-
-        # X-boundary initialization (at the ix entrance face only)
-        sxb = Nm1*(iy-1)
-        for i in 1:Nm1
-            bufx[i] += srcx[sxb+i]
-        end
-
-        for ix in x_sweep
-            ikx = Int64(cells.kx[ix])
-            icell = (ix-1) + Nx*(iy-1)
-            oby = Nm2*(ix-1)
-            m = mat[ix,iy,1]
-            conf = gn_fast_conf(cells,m,ix,iy,1)
-
-            if ~isCSD
-                sn_2D_BTE_fast!(𝚿,o𝚿+NMOM*icell,bufx,0,bufy,oby,
-                                Ql,Np*NMOM*icell,Mnn,Np,mom,d,ws,conf,ikx,iky)
-            else
-                sn_2D_BFP_fast!(𝚿,o𝚿+NMOM*icell,bufx,0,bufy,oby,𝚽E12,𝚽E12o,oE+NmEf*icell,
-                                Ql,Np*NMOM*icell,Mnn,Np,mom,d,ws,conf,ikx,iky,m,do_E,zero_E)
-            end
-
-            # Save the y-outgoing boundary at the exit line
-            if is_y_exit
-                for i in 1:Nm2
-                    outy[oby+i] = bufy[oby+i]
-                end
-            end
-        end
-
-        # Save the x-outgoing boundary (end of the x sweep for this iy)
-        if save_out
-            for i in 1:Nm1
-                outx[sxb+i] = bufx[i]
-            end
-        end
-    end
-
-    return nothing
 end

@@ -160,6 +160,35 @@ function get_method(this::Solvers,particle::Particle)
 end
 
 """
+    get_method_by_index(this::Solvers,index::Int64)
+
+Get the method associated with a particle by its insertion order (1-based).
+This allows different solvers to be associated with particles that share the same tag.
+
+# Important known gap
+`Fixed_Sources.build()` still resolves the source shape via the first solver that
+matches the particle tag. When using multiple solvers per tag, all solvers must be
+source-compatible (same angular/spatial discretization requirements), or the second
+solver may receive a source with an incompatible shape and fail at runtime. Fixing
+this requires building sources per solver index in `Fixed_Sources`, which is not yet
+implemented.
+
+# Input Argument(s)
+- `this::Solvers` : collection of discretization method.
+- `index::Int64` : particle/solver index.
+
+# Output Argument(s)
+- `method::Solver` : method at the requested index.
+
+"""
+function get_method_by_index(this::Solvers,index::Int64)
+    if index < 1 || index > this.number_of_particles
+        error("Solver index $index is out of bounds (1:$(this.number_of_particles)).")
+    end
+    return this.methods_list[index]
+end
+
+"""
     get_maximum_number_of_generations(this::Solvers)
 
 Get the maximum number of generations.

@@ -546,6 +546,7 @@ Get the voxel boundaries along each axis.
 
 """
 function get_voxels_boundaries(this::Geometry)
+    @warn "get_voxels_boundaries(::Geometry) is deprecated and returns voxel widths (not boundaries); use get_voxels_boundaries(::Geometry, axis::String) instead."
     N = this.get_dimension()
     axis = this.get_axis()
     sb = Vector{Vector{Float64}}(undef,3)

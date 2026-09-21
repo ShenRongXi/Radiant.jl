@@ -1,6 +1,6 @@
 """
     compute_flux(cross_sections::Cross_Sections,geometry::Geometry,
-    solver::SN,source::Source)
+    solver::SN,source::Source,electromagnetic_field::Electromagnetic_Field=Electromagnetic_Field();parallel::Bool=true)
 
 Solve the transport equation using the discrete ordinates (SN) method for a given particle.  
 
@@ -19,7 +19,57 @@ Solve the transport equation using the discrete ordinates (SN) method for a give
 N/A
 
 """
-function compute_flux(cross_sections::Cross_Sections,geometry::Geometry,solver::SN,source::Source,electromagnetic_field::Electromagnetic_Field=Electromagnetic_Field())
+function compute_flux(cross_sections::Cross_Sections,geometry::Geometry,solver::SN,source::Source,electromagnetic_field::Electromagnetic_Field=Electromagnetic_Field();parallel::Bool=true)
+
+    # FCS guard: route to compute_flux_fcs when the FCS flag is enabled
+    if solver.get_is_first_collision_source()
+        return compute_flux_fcs(cross_sections,geometry,solver,source;parallel=parallel)
+    end
+
+    # Point-source uncollided-flux branch (standard SN path, BTE only). When the FCS flag
+    # is off but the source carries internal point sources, compute their uncollided flux
+    # analytically, fold it into the volume source as a first collision source, solve the
+    # scattered flux, and return ψ_total = φ_u + ψ_s. See plan §2.4.1.
+    if has_point_sources(source) && !solver.get_is_first_collision_source()
+        @assert geometry.get_dimension() == 3 "Point-source path requires 3D geometry."
+        @assert geometry.get_type() == "cartesian" "Point-source DDA requires cartesian grid."
+        SN_type = solver.get_angular_boltzmann()
+        @assert SN_type ∈ ("standard","galerkin-d") "Standard point-source path supports standard and galerkin-d angular discretization."
+        _solver_type,_is_CSD = solver.get_solver_type()
+        @assert !_is_CSD "Standard point-source path only supports BTE."
+        _,𝒪p,Nmp = solver.get_schemes(geometry,solver.get_is_full_coupling())
+        @assert all(𝒪p[1:3] .∈ Ref((1,2))) "Point-source path requires spatial order 1 or 2."
+        @assert 𝒪p[4] == 1 "Standard point-source path requires energy order 1."
+
+        sn_angle_discre = build_angular_discretization(solver,geometry)
+        Np_p = sn_angle_discre.Np
+        pl_p = sn_angle_discre.pl
+        part_p = solver.get_particle()
+        Ls_p = maximum(pl_p)
+        Σs_p = cross_sections.get_scattering(part_p,part_p,Ls_p)
+        mat_p = geometry.get_material_per_voxel()
+        Ns_p = geometry.get_number_of_voxels()
+        Ng_p = cross_sections.get_number_of_groups(part_p)
+
+        cache_p = build_point_source_trace_cache(source.point_sources,geometry,cross_sections,solver)
+        φ_u = _compute_uncollided_point_flux_bte(cache_p,cross_sections,geometry,solver,source,sn_angle_discre)
+
+        Q_FCS = zeros(size(φ_u))
+        for ig in range(1,Ng_p)
+            scattering_source(@view(Q_FCS[ig,:,:,:,:,:]),φ_u,Σs_p[:,:,ig,:],
+                              mat_p,Np_p,pl_p,size(φ_u,3),Ns_p,Ng_p,ig,true;parallel=false)
+        end
+
+        source_for_solver = deepcopy(source)
+        source_for_solver.volume_sources .+= Q_FCS
+        empty!(source_for_solver.point_sources)   # prevent infinite recursion
+        flux_s = compute_flux(cross_sections,geometry,solver,source_for_solver;parallel=parallel)
+
+        flux = Flux_Per_Particle(part_p)
+        flux.add_flux(φ_u .+ flux_s.get_flux())
+        flux.add_spectral_radius(flux_s.get_spectral_radius())
+        return flux
+    end
 
 #----
 # Geometry data
@@ -45,7 +95,14 @@ Qdims = solver.get_quadrature_dimension(Ndims)
 if typeof(Ω) == Vector{Float64} Ω = [Ω,0*Ω,0*Ω] end
 Nd = length(w)
 Np,Mn,Dn,pl,pm = angular_polynomial_basis(Ω,w,L,SN_type,Qdims)
-Np_surf,Mn_surf,Dn_surf,n⁺_to_n,n_to_n⁺,pl_surf,pm_surf = surface_angular_polynomial_basis(Ω,w,L,SN_type,Qdims,Ndims,geo_type)
+if SN_type == "galerkin-direct"
+    if Ndims != 1 || Qdims != 1 || quadrature_type != "gauss-lobatto"
+        error("galerkin-direct surface sources require 1D Gauss-Lobatto quadrature.")
+    end
+    Np_surf,Mn_surf,Dn_surf,n⁺_to_n,n_to_n⁺,pl_surf,pm_surf = direct_surface_angular_basis_1D(Ω)
+else
+    Np_surf,Mn_surf,Dn_surf,n⁺_to_n,n_to_n⁺,pl_surf,pm_surf = surface_angular_polynomial_basis(Ω,w,L,SN_type,Qdims,Ndims,geo_type)
+end
 
 #----
 # Preparation of cross sections
@@ -140,27 +197,6 @@ volume_sources = source.get_volume_sources()
 Np_source = Int64(min(Np_surf,length(surface_sources[1,:,1])))
 
 #----
-# Optimized solver chain
-#----
-# Opt-in, see set_fast_path. Numerically equivalent to the reference chain but only covers the
-# cases sn_fast_applicable accepts — in particular not the adaptive schemes; anything else
-# falls back rather than failing.
-use_fast = solver.get_fast_path()
-if use_fast
-    is_ok, why = sn_fast_applicable(Ndims,Δs,Nmat,𝒪,isFC,Nd,is_adaptive)
-    if ~is_ok
-        println(">>>Fast path unavailable (",why,") — using the reference solver chain.")
-        use_fast = false
-    else
-        println(">>>Fast path enabled ($Nd directions).")
-    end
-end
-
-# With every boundary void, the boundary angular fluxes are identically zero and nothing ever
-# reads them — the whole half-range machinery can then be skipped.
-need_boundary_flux = any(x->x != 0,boundary_conditions)
-
-#----
 # Flux calculations
 #----
 
@@ -222,11 +258,7 @@ while ~(is_outer_convergence)
             Tg = Vector{Float64}()
             ℳ = Array{Float64}(undef)
         end
-        if use_fast
-            𝚽l[ig,:,:,:,:,:],𝚽E12,ρ_in[ig],Ntot = sn_one_speed_fast(𝚽l[ig,:,:,:,:,:],Qlout,Σtot[ig,:],Σs[:,ig,ig,:],mat,Ndims,Nd,ig,Ns,Δs,Ω,Mn,Dn,Np,pl,Mn_surf,Dn_surf,Np_surf,n_to_n⁺,𝒪,Nm,isFC,𝒞,ω,I_max,ϵ_max,surface_sources[ig,:,:],is_CSD,solver_type,ΔEg,𝚽E12,Sg⁻,Sg⁺,Sg,Tg,ℳ,𝒜,Ntot,is_EM,ℳ_EM[ig,:,:],𝒲,boundary_conditions,Np_source,need_boundary_flux,gmres_restart,anderson_depth)
-        else
         𝚽l[ig,:,:,:,:,:],𝚽E12,ρ_in[ig],Ntot = sn_one_speed(𝚽l[ig,:,:,:,:,:],Qlout,Σtot[ig,:],Σs[:,ig,ig,:],mat,Ndims,Nd,ig,Ns,Δs,Ω,Mn,Dn,Np,pl,Mn_surf,Dn_surf,Np_surf,n_to_n⁺,𝒪,Nm,isFC,𝒞,ω,I_max,ϵ_max,surface_sources[ig,:,:],is_adaptive,is_CSD,solver_type,ΔEg,𝚽E12,Sg⁻,Sg⁺,Sg,Tg,ℳ,𝒜,Ntot,is_EM,ℳ_EM[ig,:,:],𝒲,boundary_conditions,Np_source,gmres_restart,anderson_depth)
-        end
     end
 
     # Verification of convergence in all energy groups
@@ -236,23 +268,22 @@ while ~(is_outer_convergence)
     end
     if (ϵ_out < ϵ_max || i_out >= I_max) || ~is_outer_iteration
         is_outer_convergence = true
-        # Calculate the flux at the cutoff energy
+        # Calculate the flux at the cutoff energy. The is loop uses Nm[4]
+        # (not Nm[5]) because 𝚽E12 is sized (Nd, Nm[4], ...); tail elements
+        # 𝚽cutoff[:, Nm[4]+1:Nm[5], ...] intentionally remain zero.
         if is_CSD
-            if use_fast
-                # Same contraction, as one gemm per energy moment instead of Nd × Nvox × Nm[4]
-                # × Np scalar updates whose innermost index is the slowest of 𝚽E12. Measured at
-                # 81 % of the whole optimized run before this change, on a 2D BFP case — the
-                # reference solver was slow enough to hide it.
-                Nvox = Ns[1]*Ns[2]*Ns[3]
-                Cr = reshape(𝚽cutoff,Np,Nm[5],Nvox)
-                Er = reshape(𝚽E12,Nd,Nm[4],Nvox)
-                for is in range(1,Nm[4])
-                    @views mul!(Cr[:,is,:],Dn,Er[:,is,:],1.0,1.0)
+            Nxyz = Ns[1] * Ns[2] * Ns[3]
+            if parallel && Threads.nthreads() > 1 && Nxyz >= PAR_MIN_NVOXELS
+                @threads :static for I in CartesianIndices((Ns[1], Ns[2], Ns[3]))
+                    ix, iy, iz = Tuple(I)
+                    for is in range(1,Nm[4]), n in range(1,Nd), p in range(1,Np)
+                        𝚽cutoff[p,is,ix,iy,iz] += Dn[p,n] * 𝚽E12[n,is,ix,iy,iz]
+                    end
                 end
             else
-            for n in range(1,Nd), ix in range(1,Ns[1]), iy in range(1,Ns[2]), iz in range(1,Ns[3]), is in range(1,Nm[4]), p in range(1,Np)
-                𝚽cutoff[p,is,ix,iy,iz] += Dn[p,n] * 𝚽E12[n,is,ix,iy,iz]
-            end
+                for n in range(1,Nd), ix in range(1,Ns[1]), iy in range(1,Ns[2]), iz in range(1,Ns[3]), is in range(1,Nm[4]), p in range(1,Np)
+                    𝚽cutoff[p,is,ix,iy,iz] += Dn[p,n] * 𝚽E12[n,is,ix,iy,iz]
+                end
             end
         end
     else
